@@ -9,7 +9,7 @@ class Produto:
 
     def alterar_preco(self, novo_preco):
         if novo_preco < 0:
-            return "Valor invalido"
+            raise ValueError('preço não pode ser negativo')
         self._preco = novo_preco
 
     def mostrar_preco(self):

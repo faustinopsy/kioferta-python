@@ -9,6 +9,9 @@ cafe = Produto(4, "Três corações", 13.60)
 lista_de_produtos = [arroz, feijao, cafe]
 for i in lista_de_produtos:
     print(f" Nome: {i._nome} e o preço é {i._preco} ")
+try:
+    resultado = cafe.alterar_preco(-1)
+except ValueError as e:
+    print(f"Erro: {e}")
 
-resultado = cafe.alterar_preco(23.80)
 print( f" Novo preço do café { cafe.mostrar_preco() }"  )

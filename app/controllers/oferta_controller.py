@@ -1,53 +1,48 @@
-from app.models.oferta import carregar_ofertas
+from app.controllers.dicionarios import oferta_para_dicionario
+from app.models.banco import banco as banco_da_api
 
 
 class OfertaController:
-    def __init__(self):
-        self._ofertas = carregar_ofertas()
-
-    def listar(self):
-        return [self._para_dicionario(o) for o in self._ofertas]
+    def __init__(self, banco=banco_da_api):
+        self._banco = banco
 
     def buscar(self, id):
-        for oferta in self._ofertas:
-            if oferta.mostrar_id() == id:
-                return self._para_dicionario(oferta)
-        return None
+        oferta = self._banco.oferta(id)
+        if oferta is None:
+            return None
+        return self._dicionario(oferta)
 
-    def listar_por_produto(self, produto_id):
-        do_produto = [o for o in self._ofertas if o.e_do_produto(produto_id)]
-        ordenadas = sorted(do_produto, key=lambda o: o.mostrar_preco())
-        return [self._para_dicionario(o) for o in ordenadas]
-
-    def listar_por_mercado(self, mercado_id):
-        do_mercado = [o for o in self._ofertas if o.e_do_mercado(mercado_id)]
-        ordenadas = sorted(do_mercado, key=lambda o: o.mostrar_preco())
-        return [self._para_dicionario(o) for o in ordenadas]
-
-    def comparativo(self, produto_id):
-        do_produto = [o for o in self._ofertas if o.e_do_produto(produto_id)]
-        if not do_produto:
+    # Tela 9. O controller não pergunta o perfil de ninguém:
+    # autor.publicar decide sozinho se pode e como a oferta nasce.
+    def publicar(self, usuario_id, produto_id, mercado_id, preco, so_cartao=False, foto=''):
+        autor = self._banco.usuario(usuario_id)
+        produto = self._banco.produto(produto_id)
+        mercado = self._banco.mercado(mercado_id)
+        if autor is None or produto is None or mercado is None:
             return None
 
-        ordenadas = sorted(do_produto, key=lambda o: o.mostrar_preco())
-        melhor = ordenadas[0]
-        produto = melhor.mostrar_produto()
+        oferta = autor.publicar(self._banco.proximo_id(self._banco.ofertas),
+                                produto, mercado, preco, so_cartao, foto)
+        self._banco.ofertas.append(oferta)
+        return self._dicionario(oferta)
 
-        return {
-            'produto': produto.mostrar_nome(),
-            'preco_normal': produto.mostrar_preco(),
-            'menor_preco': melhor.mostrar_preco(),
-            'economia': melhor.economia(),
-            'mercados': len(ordenadas),
-            'ofertas': [self._para_dicionario(o) for o in ordenadas],
-        }
+    # Tela 3: "Confirmar este preço".
+    def confirmar(self, oferta_id, usuario_id):
+        oferta = self._banco.oferta(oferta_id)
+        usuario = self._banco.usuario(usuario_id)
+        if oferta is None or usuario is None:
+            return None
+        usuario.confirmar(oferta)
+        return self._dicionario(oferta)
 
-    def _para_dicionario(self, oferta):
-        return {
-            'id': oferta.mostrar_id(),
-            'produto': oferta.mostrar_produto().mostrar_nome(),
-            'mercado': oferta.mostrar_mercado().mostrar_nome(),
-            'preco': oferta.mostrar_preco(),
-            'economia': oferta.economia(),
-            'desconto': oferta.desconto_percentual(),
-        }
+    # Tela 10: minhas contribuições, das mais recentes.
+    def do_autor(self, usuario_id):
+        if self._banco.usuario(usuario_id) is None:
+            return None
+        do_autor = [o for o in self._banco.ofertas if o.e_do_autor(usuario_id)]
+        ordenadas = sorted(do_autor, key=lambda o: o.mostrar_horas_atras())
+        return [self._dicionario(o) for o in ordenadas]
+
+    def _dicionario(self, oferta):
+        posicao = self._banco.posicao_padrao
+        return oferta_para_dicionario(oferta, posicao['lat'], posicao['lng'])

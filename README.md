@@ -1,89 +1,100 @@
 # KiOferta API — repositório modelo
 
 Backend de referência da disciplina de **Programação Orientada a Objetos**.
-Construído em quatro camadas, no padrão **MVC**, com FastAPI.
+Quatro camadas, padrão **MVC**, FastAPI, **sem banco de dados**: tudo fica em
+listas na memória até a API reiniciar.
 
-Este repositório é o **modelo**: use a estrutura, os nomes e os padrões daqui
-para construir o sistema da sua equipe.
+Atende as **onze telas** do app KiOferta (disciplina de Dispositivos Móveis):
+cada rota existe porque uma tela precisa dela.
 
 ---
 
 ## Como rodar
 
 ```bash
-# 1. clonar e entrar na pasta
-git clone https://github.com/faustinopsy/kioferta-python.git
-cd kioferta-python
-
-# 2. criar e ativar o ambiente virtual
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 source .venv/bin/activate       # Linux e macOS
 
-# 3. instalar as bibliotecas
 pip install -r requirements.txt
+uv run fastapi dev
 
-# 4. subir a API
-uvicorn main:app --reload
 ```
 
-Abra `http://127.0.0.1:8000/docs`.
+Abra `http://127.0.0.1:8000/docs`. Precisa de **Python 3.10 ou mais novo** (por causa do `match`).
 
----
-
-## Verificar se está tudo certo
+## Verificar
 
 ```bash
-python verificar.py        # testa models e controllers, sem subir a API
-python testar_rotas.py     # testa as 24 rotas (precisa de: pip install httpx)
+python verificar.py        # 91 checagens nas models e controllers, sem subir a API
+python testar_rotas.py     # 62 checagens nas 19 rotas
 ```
-
-Os dois scripts são o molde do que será exigido na sua entrega.
 
 ---
 
-## A estrutura
+## Estrutura
 
 ```
-kioferta-api/
+kioferta-python/
 ├── main.py                  liga os módulos à aplicação
-├── requirements.txt
 ├── verificar.py             testa models e controllers
 ├── testar_rotas.py          testa as rotas
 └── app/
-    ├── data/                dados provisórios (mock)
-    │   ├── produtos_mock.py
+    ├── data/                dados provisórios (mock): só dicionários
+    │   ├── produtos_mock.py     CATEGORIAS e PRODUTOS
+    │   ├── mercados_mock.py     MERCADOS e POSICAO_PADRAO
     │   ├── usuarios_mock.py
-    │   ├── mercados_mock.py
-    │   └── ofertas_mock.py
-    ├── models/              M — classes e regras de negócio
-    │   ├── produto.py       Produto + carregar_produtos()
-    │   ├── mercado.py       Mercado + carregar_mercados()
-    │   ├── oferta.py        Oferta  + carregar_ofertas()
-    │   └── usuario.py       Usuario + 3 filhas + PERFIS + carregar_usuarios()
-    ├── controllers/         C — casos de uso
+    │   ├── ofertas_mock.py
+    │   └── semana_mock.py
+    ├── models/              M — classes e regras
+    │   ├── produto.py           Produto + carregar_produtos()
+    │   ├── mercado.py           Mercado + distancia_ate()
+    │   ├── oferta.py            Oferta + votação + carregar_ofertas()
+    │   ├── usuario.py           Usuario + 3 filhas + PERFIS + roteiros
+    │   ├── erros.py             ConflitoError (vira 409)
+    │   └── banco.py             o "banco": os objetos na memória
+    ├── controllers/         C — casos de uso, um por assunto
+    │   ├── dicionarios.py       objeto -> dicionário (e o motivo com match)
     │   ├── produto_controller.py
-    │   ├── usuario_controller.py
     │   ├── mercado_controller.py
-    │   └── oferta_controller.py
+    │   ├── oferta_controller.py
+    │   └── usuario_controller.py
     └── routes/              V — endereços HTTP e códigos de resposta
+        ├── catalogo_routes.py
         ├── produto_routes.py
-        ├── usuario_routes.py
         ├── mercado_routes.py
-        └── oferta_routes.py
+        ├── oferta_routes.py
+        ├── usuario_routes.py
+        └── moderacao_routes.py
 ```
 
-### A regra de dependência
+A dependência aponta só para baixo: `main → routes → controllers → models → data`.
 
+**Teste prático:** abra qualquer arquivo de `models/` ou `controllers/`.
+Se aparecer `fastapi`, `HTTPException` ou `router`, a camada foi violada.
+
+---
+
+## Sem banco de dados: `models/banco.py`
+
+```python
+class Banco:
+    def __init__(self):
+        self.produtos = carregar_produtos()
+        self.mercados = carregar_mercados()
+        self.usuarios = carregar_usuarios()
+        self.ofertas = carregar_ofertas(self.produtos, self.mercados, self.usuarios)
+
+banco = Banco()          # a instância única que a API usa
 ```
-main.py  →  routes/  →  controllers/  →  models/  →  data/
-```
 
-A seta aponta **só para baixo**. A camada de fora conhece a de dentro; a de
-dentro nunca conhece a de fora.
-
-**Teste prático:** abra qualquer arquivo de `models/`. Se aparecer a palavra
-`fastapi`, `HTTPException` ou `router`, a camada foi violada.
+- Os objetos são carregados **uma vez** e todos os controllers usam a mesma
+  instância. Por isso, a oferta publicada pela tela 9 já aparece na busca da tela 2.
+- A oferta recebe as listas já carregadas e liga os ids aos objetos (o JOIN).
+- Os testes criam o próprio `Banco()`, para um teste não mexer no outro:
+  `ProdutoController(Banco())`.
+- Na aula de persistência, o `Banco` dá lugar a um banco de verdade e os
+  controllers não mudam.
 
 ---
 
@@ -91,189 +102,152 @@ dentro nunca conhece a de fora.
 
 | Pergunta | Camada | Como |
 |---|---|---|
-| O nome pode ser vazio? | model | `raise ValueError` |
-| O produto 99 existe? | controller | devolve `None` |
+| O código de barras tem 8 ou 13 números? | model | `raise ValueError` → 422 |
+| Este perfil pode publicar? | model | `raise PermissionError` → 403 |
+| Já confirmou este preço? | model | `raise ConflitoError` → 409 |
+| O produto 99 existe? | controller | devolve `None` → 404 |
 | Em que ordem as ofertas saem? | controller | `sorted` com `key` |
-| Que código HTTP responder? | routes | `404`, `409`, `422` |
-| Qual o endereço da rota? | routes | `APIRouter(prefix=...)` |
-| De onde vêm os dados? | data | o arquivo `*_mock.py` |
+| Que código HTTP responder? | routes | `except` na ordem certa |
 
----
+### A ordem dos `except` importa
 
-## Os padrões que você deve copiar
-
-### 1. Model: atributo protegido, construtor que valida
+`ConflitoError` é filha de `ValueError`. Se o `except ValueError` vier antes,
+ele captura o conflito também e a resposta sai 422 em vez de 409.
 
 ```python
-class Produto:
-    def __init__(self, id, nome, categoria, preco):
-        self._id = id                    # protegido
-        self._categoria = categoria
-        self.alterar_nome(nome)          # passa pelo método, valida
-        self.alterar_preco(preco)
-
-    def mostrar_nome(self):              # leitura
-        return self._nome
-
-    def alterar_preco(self, novo_preco): # alteração com regra
-        if novo_preco < 0:
-            raise ValueError('preço não pode ser negativo')
-        self._preco = novo_preco
-```
-
-Não existe `alterar_id`: identidade não muda.
-
-### 2. Função de carga no fim do arquivo, fora da classe
-
-```python
-def carregar_produtos():
-    return [Produto(p['id'], p['nome'], p['categoria'], p['preco'])
-            for p in PRODUTOS]
-```
-
-### 3. Associação: guardar o objeto, não o id
-
-```python
-class Oferta:
-    def __init__(self, id, produto, mercado, novo_preco):
-        self._produto = produto   # o objeto Produto inteiro
-        self._mercado = mercado   # o objeto Mercado inteiro
-```
-
-E a ligação é feita uma vez só, no carregamento:
-
-```python
-produtos = {p.mostrar_id(): p for p in carregar_produtos()}
-# ...
-produtos[o['produto_id']]     # o id vira objeto
-```
-
-### 4. Herança: a filha escreve só a diferença
-
-```python
-class Visitante(Usuario):
-    def mostrar_permissoes(self):
-        return ['ver_ofertas']
-
-class Contribuidor(Visitante):
-    def mostrar_permissoes(self):
-        return super().mostrar_permissoes() + ['cadastrar_oferta']
-```
-
-`super()` **estende** a lista da classe de cima em vez de substituí-la.
-
-### 5. Polimorfismo: nenhum `if` de perfil
-
-```python
-PERFIS = {'visitante': Visitante,
-          'contribuidor': Contribuidor,
-          'moderador': Moderador}
-
-def carregar_usuarios():
-    return [PERFIS[u['perfil']](u['id'], u['nome'], u['senha'])
-            for u in USUARIOS]
-```
-
-O valor do dicionário é a própria **classe**. Os parênteses depois a instanciam.
-
-### 6. Controller: filtra, ordena, converte
-
-```python
-def listar_por_produto(self, produto_id):
-    do_produto = [o for o in self._ofertas if o.e_do_produto(produto_id)]
-    ordenadas = sorted(do_produto, key=lambda o: o.mostrar_preco())
-    return [self._para_dicionario(o) for o in ordenadas]
-```
-
-Nenhuma validação e nenhum código HTTP aqui.
-
-### 7. Routes: traduz o resultado em resposta
-
-```python
-@router.get('/{id}')
-def buscar(id: int):
-    produto = controller.buscar(id)
-    if produto is None:
-        raise HTTPException(404, 'produto não encontrado')
-    return produto
-```
-
-### 8. Acrescentar um módulo: duas linhas no main.py
-
-```python
-from app.routes.meu_routes import router as meu_router
-app.include_router(meu_router)
+try:
+    oferta = controller.confirmar(id, dados.usuario_id)
+except ConflitoError as erro:          # filha de ValueError: vem primeiro
+    raise HTTPException(409, str(erro))
+except PermissionError as erro:
+    raise HTTPException(403, str(erro))
 ```
 
 ---
 
-## As 24 rotas
+## Herança e polimorfismo: a mesma chamada, um comportamento por perfil
 
-| Verbo | Endereço | Devolve |
+```python
+class Usuario:
+    def publicar(self, id, produto, mercado, preco, so_cartao=False, foto=''):
+        self._validar('enviar_oferta')                     # passo
+        return Oferta(id, produto, mercado, preco, self,
+                      status=self.status_inicial())        # passo
+
+    def status_inicial(self):
+        if self._reputacao >= REPUTACAO_SEM_VOTACAO:       # 200 pontos
+            return 'aprovada'
+        return 'votacao'
+
+class Visitante(Usuario):            # só consulta
+class Contribuidor(Visitante):       # + enviar_oferta, confirmar_oferta
+class Moderador(Contribuidor):       # + moderar_contas
+    def status_inicial(self):
+        return 'aprovada'
+```
+
+| Quem | Permissões | A oferta nasce |
 |---|---|---|
-| GET | `/api/produtos` | todos os produtos |
-| GET | `/api/produtos/{id}` | um produto, ou 404 |
-| GET | `/api/produtos/categoria/{categoria}` | produtos da categoria, ou 404 |
-| GET | `/api/produtos/{id}/ofertas` | ofertas do produto, da mais barata |
-| GET | `/api/produtos/{id}/comparativo` | comparativo completo, ou 404 |
-| GET | `/api/mercados` | todos os mercados |
-| GET | `/api/mercados/{id}` | um mercado, ou 404 |
-| GET | `/api/mercados/{id}/ofertas` | ofertas daquele mercado |
-| GET | `/api/ofertas` | todas as ofertas |
-| GET | `/api/ofertas/{id}` | uma oferta, ou 404 |
-| POST | `/api/login` | perfil e permissões, ou 401 |
+| Visitante | ver_ofertas | — (403) |
+| Contribuidor com menos de 200 | + enviar e confirmar | `votacao` |
+| Contribuidor com 200 ou mais | + enviar e confirmar | `aprovada` |
+| Moderador | + moderar_contas | `aprovada` |
+| Qualquer conta `pendente` | — | — (403: conta em análise) |
+
+Os roteiros `publicar`, `confirmar` e `decidir` ficam na base e **nenhuma filha
+os reescreve**: elas trocam só o passo (`mostrar_permissoes`, `status_inicial`).
+Nenhum `if` pergunta o perfil nas models e nos controllers.
+
+## `match/case` na moderação e no motivo
+
+```python
+def decidir(self, conta, acao):
+    self._validar('moderar_contas')
+    match acao:
+        case 'aprovar':
+            conta.aprovar()
+        case 'recusar':
+            conta.recusar()
+        case _:
+            raise ValueError("a ação precisa ser 'aprovar' ou 'recusar'")
+```
+
+O mesmo padrão escreve o motivo de cada contribuição (tela 10), em
+`controllers/dicionarios.py`.
+
+## A votação
+
+- Toda oferta de contribuidor com menos de 200 pontos nasce `votacao`.
+- Cada confirmação de **outra pessoa** soma 1. Com **3**, vira `aprovada`.
+- Ninguém confirma a própria oferta (403), nem duas vezes (409).
+- Uma oferta aprovada rende 4 pontos, mais 1 por confirmação.
 
 ---
 
-## Exemplo de resposta
+## As 19 rotas
+
+| Tela | Verbo | Endereço | Respostas |
+|---|---|---|---|
+| 1 | GET | `/api/semana` | 200 |
+| 1 | GET | `/api/categorias` | 200 |
+| 2 | GET | `/api/produtos?busca=café&categoria=Mercearia&ordem=distancia` | 200, 422 |
+| 3 | GET | `/api/produtos/{id}` | 200, 404 |
+| 9 | GET | `/api/produtos/codigo/{codigo}` | 200, 404, 422 |
+| 9 | POST | `/api/produtos` | 201, 409, 422 |
+| 4 | GET | `/api/mercados` | 200 |
+| 5 | GET | `/api/mercados/{id}` | 200, 404 |
+| 5 | GET | `/api/mercados/{id}/ofertas` | 200, 404 |
+| 4 | GET | `/api/mapa?produto_id=1` | 200 |
+| 3 | GET | `/api/ofertas/{id}` | 200, 404 |
+| 9 | POST | `/api/ofertas` | 201, 403, 404, 422 |
+| 3 | POST | `/api/ofertas/{id}/confirmacoes` | 200, 403, 404, 409 |
+| 10 | GET | `/api/usuarios/{id}/ofertas` | 200, 404 |
+| 7 | POST | `/api/login` | 200, 401, 422 |
+| 7 | POST | `/api/usuarios` | 201, 409, 422 |
+| 8 e 10 | GET | `/api/usuarios/{id}` | 200, 404 |
+| 11 | GET | `/api/moderacao/contas?moderador_id=2` | 200, 403, 404 |
+| 11 | PATCH | `/api/moderacao/contas/{id}` | 200, 403, 404, 409, 422 |
+
+As rotas de busca, mapa e mercado aceitam `lat` e `lng`. Sem eles, a distância
+é calculada a partir da `POSICAO_PADRAO` (o GPS do app entra depois).
+
+### Exemplos
 
 ```
-GET /api/produtos/1/comparativo
-```
+POST /api/ofertas
+{ "usuario_id": 1, "produto_id": 10, "mercado_id": 5, "preco": 5.49 }
 
-```json
-{
-  "produto": "Arroz Tipo 1 5kg",
-  "preco_normal": 24.9,
-  "menor_preco": 19.9,
-  "economia": 5.0,
-  "mercados": 3,
-  "ofertas": [
-    {"id": 1, "produto": "Arroz Tipo 1 5kg", "mercado": "Mercado Silva",
-     "preco": 19.9, "economia": 5.0, "desconto": 20.1},
-    {"id": 3, "produto": "Arroz Tipo 1 5kg", "mercado": "Mercadinho Bom Preço",
-     "preco": 21.0, "economia": 3.9, "desconto": 15.7},
-    {"id": 2, "produto": "Arroz Tipo 1 5kg", "mercado": "Supermercado Dia",
-     "preco": 22.5, "economia": 2.4, "desconto": 9.6}
-  ]
-}
+201 { "id": 52, "preco": 5.49, "status": "votacao",
+      "motivo": "0 de 3 confirmações", ... }
 ```
 
 ```
-POST /api/login   { "nome": "caio", "senha": "caio123" }
-```
+PATCH /api/moderacao/contas/6
+{ "moderador_id": 2, "acao": "aprovar" }
 
-```json
-{
-  "id": 3,
-  "nome": "caio",
-  "perfil": "moderador",
-  "permissoes": ["ver_ofertas", "cadastrar_oferta",
-                 "remover_oferta", "banir_usuario"]
-}
+200 { "id": 6, "nome": "Juliana Prado Fonseca", "status": "aprovado", ... }
 ```
 
 A senha nunca aparece na resposta. Não existe `mostrar_senha`.
 
+### Sem login de verdade, por enquanto
+
+Quem faz a ação manda o próprio id no corpo (`usuario_id`, `moderador_id`).
+Token e sessão ficam para depois: o assunto aqui é a orientação a objetos.
+
 ---
 
-## Usuários de teste
+## Contas de teste
 
-| nome | senha | perfil | permissões |
+| E-mail | Senha | Perfil | Situação |
 |---|---|---|---|
-| bia | bia123 | visitante | 1 |
-| ana | ana123 | contribuidor | 2 |
-| caio | caio123 | moderador | 4 |
+| marina@kioferta.com | marina123 | contribuidor | 128 pontos: vai para votação |
+| rafael@kioferta.com | rafael123 | contribuidor | 212 pontos: publica direto |
+| bruna@kioferta.com | bruna123 | contribuidor | 86 pontos |
+| caio@kioferta.com | caio1234 | moderador | publica direto e modera |
+| marcos@email.com | marcos123 | contribuidor | pendente |
+| juliana@email.com | juliana123 | contribuidor | pendente |
+| sandro@email.com | sandro123 | contribuidor | pendente |
 
 ---
 
@@ -282,8 +256,8 @@ A senha nunca aparece na resposta. Não existe `mostrar_senha`.
 | Sintoma | Causa | Correção |
 |---|---|---|
 | `ModuleNotFoundError: app` | rodou de dentro de uma subpasta | `uvicorn` a partir da raiz |
-| `ModuleNotFoundError: fastapi` | ambiente virtual desativado | ative o `.venv` |
-| rota não aparece no `/docs` | faltou `include_router` | duas linhas no `main.py` |
-| `ImportError: circular import` | model importando controller | apague o import da model |
-| `Unable to serialize` | devolveu o objeto | use `_para_dicionario` |
-| erro 500 em vez de 422 | faltou `try/except` na rota | capture `ValueError` |
+| `SyntaxError` no `match` | Python antigo | use 3.10 ou mais novo |
+| a oferta publicada não aparece na busca | controller criou o próprio `Banco()` | use o `banco` de `models/banco.py` |
+| 409 saiu como 422 | `except ValueError` antes do `ConflitoError` | a filha vem primeiro |
+| `/api/produtos?ordem=nome` dá 422 | `ordem` é `Literal['preco', 'distancia']` | o FastAPI valida sozinho |
+| `Unable to serialize` | devolveu o objeto | use as funções de `dicionarios.py` |
